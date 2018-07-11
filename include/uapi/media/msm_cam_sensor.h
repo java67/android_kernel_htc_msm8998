@@ -39,8 +39,6 @@
 
 #define MSM_V4L2_PIX_FMT_META v4l2_fourcc('M', 'E', 'T', 'A') /* META */
 #define MSM_V4L2_PIX_FMT_META10 v4l2_fourcc('M', 'E', '1', '0') /* META10 */
-#define MSM_V4L2_PIX_FMT_META12 v4l2_fourcc('M', 'E', '1', '2') /* META12 */
-
 #define MSM_V4L2_PIX_FMT_SBGGR14 v4l2_fourcc('B', 'G', '1', '4')
 	/* 14  BGBG.. GRGR.. */
 #define MSM_V4L2_PIX_FMT_SGBRG14 v4l2_fourcc('G', 'B', '1', '4')
@@ -90,7 +88,6 @@ enum sensor_sub_module_t {
 	SUB_MODULE_EXT,
 	SUB_MODULE_IR_LED,
 	SUB_MODULE_IR_CUT,
-	SUB_MODULE_LASER_LED,
 	SUB_MODULE_MAX,
 };
 
@@ -232,6 +229,15 @@ struct camera_vreg_t {
 	enum camera_vreg_type type;
 };
 
+//HTC_START
+struct alpha_value{
+	uint8_t Alpha_Gb;
+	uint8_t Alpha_B;
+	uint8_t Alpha_R;
+	uint8_t Alpha_Gr;
+};
+//HTC_END
+
 struct sensorb_cfg_data {
 	int cfgtype;
 	union {
@@ -240,6 +246,9 @@ struct sensorb_cfg_data {
 		void                         *setting;
 		struct msm_sensor_i2c_sync_params sensor_i2c_sync_params;
 	} cfg;
+	//HTC_START
+	struct alpha_value alpha;
+	//HTC_END
 };
 
 struct csid_cfg_data {
@@ -304,15 +313,6 @@ struct msm_ir_cut_cfg_data_t {
 	enum msm_ir_cut_cfg_type_t cfg_type;
 };
 
-struct msm_laser_led_cfg_data_t {
-	enum msm_laser_led_cfg_type_t cfg_type;
-	void __user                   *setting;
-	void __user                   *debug_reg;
-	uint32_t                      debug_reg_size;
-	uint16_t                      i2c_addr;
-	enum i2c_freq_mode_t          i2c_freq_mode;
-};
-
 struct msm_eeprom_cfg_data {
 	enum eeprom_cfg_type_t cfgtype;
 	uint8_t is_supported;
@@ -357,6 +357,13 @@ enum msm_sensor_cfg_type_t {
 	CFG_WRITE_I2C_ARRAY_ASYNC,
 	CFG_WRITE_I2C_ARRAY_SYNC,
 	CFG_WRITE_I2C_ARRAY_SYNC_BLOCK,
+	/* HTC_START */
+	CFG_SET_GYRO_CALIBRATION,
+	CFG_SET_SENSOR_OIS_FREQ,
+	/* HTC_END */
+//HTC_START
+	CFG_READ_BLC,
+//HTC_END
 };
 
 enum msm_actuator_cfg_type_t {
@@ -368,6 +375,10 @@ enum msm_actuator_cfg_type_t {
 	CFG_ACTUATOR_POWERDOWN,
 	CFG_ACTUATOR_POWERUP,
 	CFG_ACTUATOR_INIT,
+	//HTC_START
+	CFG_ACTUATOR_OIS_GYRO_GAIN,
+	CFG_ACTUATOR_OIS_SSC_GAIN,
+	//HTC_END
 };
 
 struct msm_ois_opcode {
@@ -383,6 +394,7 @@ enum msm_ois_cfg_type_t {
 	CFG_OIS_POWERUP,
 	CFG_OIS_CONTROL,
 	CFG_OIS_I2C_WRITE_SEQ_TABLE,
+	CFG_OIS_GET_BEHAVIOR_STATUS, // HTC_ADD
 };
 
 enum msm_ois_cfg_download_type_t {
@@ -393,9 +405,7 @@ enum msm_ois_cfg_download_type_t {
 enum msm_ois_i2c_operation {
 	MSM_OIS_WRITE = 0,
 	MSM_OIS_POLL,
-	MSM_OIS_READ,
 };
-#define MSM_OIS_READ MSM_OIS_READ
 
 struct reg_settings_ois_t {
 	uint16_t reg_addr;
@@ -495,11 +505,20 @@ struct msm_ois_slave_info {
 	uint32_t i2c_addr;
 	struct msm_ois_opcode opcode;
 };
+
+//HTC_START
+struct ois_behavior_data {
+	struct timeval timestamp;
+	uint32_t data;
+};
+//HTC_END
+
 struct msm_ois_cfg_data {
 	int cfgtype;
 	union {
 		struct msm_ois_set_info_t set_info;
 		struct msm_camera_i2c_seq_reg_setting *settings;
+		struct ois_behavior_data behavior; //HTC_ADD
 	} cfg;
 };
 
@@ -629,9 +648,6 @@ struct sensor_init_cfg_data {
 
 #define VIDIOC_MSM_IR_CUT_CFG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 15, struct msm_ir_cut_cfg_data_t)
-
-#define VIDIOC_MSM_LASER_LED_CFG \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 16, struct msm_laser_led_cfg_data_t)
 
 #endif
 

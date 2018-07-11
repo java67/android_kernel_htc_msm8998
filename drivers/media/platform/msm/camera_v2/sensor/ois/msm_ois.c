@@ -33,30 +33,6 @@ static int32_t msm_ois_power_down(struct msm_ois_ctrl_t *o_ctrl);
 
 static struct i2c_driver msm_ois_i2c_driver;
 
-static int32_t data_type_to_num_bytes(
-	enum msm_camera_i2c_data_type data_type)
-{
-	int32_t ret_val;
-
-	switch (data_type) {
-	case MSM_CAMERA_I2C_BYTE_DATA:
-		ret_val = 1;
-		break;
-	case MSM_CAMERA_I2C_WORD_DATA:
-		ret_val = 2;
-		break;
-	case MSM_CAMERA_I2C_DWORD_DATA:
-		ret_val = 4;
-		break;
-	default:
-		pr_err("unsupported data type: %d\n",
-			data_type);
-		ret_val = 1;
-		break;
-	}
-	return ret_val;
-}
-
 static int32_t msm_ois_download(struct msm_ois_ctrl_t *o_ctrl)
 {
 	uint16_t bytes_in_tx = 0;
@@ -179,9 +155,13 @@ static int32_t msm_ois_write_settings(struct msm_ois_ctrl_t *o_ctrl,
 	uint16_t size, struct reg_settings_ois_t *settings)
 {
 	int32_t rc = -EFAULT;
-	int32_t i = 0, num_byte_seq = 0;
-	uint8_t *reg_data_seq;
-
+	int32_t i = 0;
+	//HTC_START, OIS
+	#ifdef CONFIG_OIS_LC898123F40_4AXIS
+	int32_t retry_cnt = 0;
+	uint8_t read_data[4] = {0};
+	#endif
+	//HTC_END, OIS
 	struct msm_camera_i2c_seq_reg_array *reg_setting;
 	CDBG("Enter\n");
 
@@ -217,6 +197,23 @@ static int32_t msm_ois_write_settings(struct msm_ois_ctrl_t *o_ctrl,
 				reg_setting->reg_data[3] = (uint8_t)
 					(settings[i].reg_data & 0x000000FF);
 				reg_setting->reg_data_size = 4;
+
+				//HTC_START, OIS
+				#ifdef CONFIG_OIS_LC898123F40_4AXIS
+				for (retry_cnt = 0; retry_cnt < 10; retry_cnt++) {
+					rc = o_ctrl->i2c_client.i2c_func_tbl->i2c_read_seq(&o_ctrl->i2c_client, 0xF100, read_data, 4);
+					if (rc < 0 || (read_data[0] & 0x1) == 1) {
+						pr_err("[OIS]%s: ois status isn't ready to enable, retry_cnt=%d\n", __func__, retry_cnt);
+						msleep(3);
+					}
+					else
+					{
+						break;
+					}
+				}
+				#endif
+				//HTC_START, OIS
+
 				rc = o_ctrl->i2c_client.i2c_func_tbl->
 					i2c_write_seq(&o_ctrl->i2c_client,
 					reg_setting->reg_addr,
@@ -259,51 +256,13 @@ static int32_t msm_ois_write_settings(struct msm_ois_ctrl_t *o_ctrl,
 					settings[i].data_type);
 				break;
 			}
-			break;
 		}
-		case MSM_OIS_READ: {
-			switch (settings[i].data_type) {
-			case MSM_CAMERA_I2C_BYTE_DATA:
-			case MSM_CAMERA_I2C_WORD_DATA:
-			case MSM_CAMERA_I2C_DWORD_DATA:
-
-				num_byte_seq =
-					data_type_to_num_bytes
-					(settings[i].data_type);
-				reg_data_seq = kzalloc(sizeof(uint32_t),
-						GFP_KERNEL);
-				if (!reg_data_seq)
-					return -ENOMEM;
-
-				rc = msm_camera_cci_i2c_read_seq
-					(&o_ctrl->i2c_client,
-					settings[i].reg_addr,
-					reg_data_seq,
-					num_byte_seq);
-
-				memcpy(&settings[i].reg_data,
-					reg_data_seq, sizeof(uint32_t));
-
-				CDBG("ois data read 0x%x from address 0x%x",
-					settings[i].reg_addr,
-					settings[i].reg_data);
-
-				kfree(reg_data_seq);
-				reg_data_seq = NULL;
-
-				break;
-			default:
-				pr_err("Unsupport data type for MSM_OIS_READ: %d\n",
-					settings[i].data_type);
-				break;
-			}
-			break;
 		}
 
 		if (rc < 0)
 			break;
-		}
 	}
+
 	CDBG("Exit\n");
 	return rc;
 }
@@ -397,12 +356,18 @@ static int msm_ois_init(struct msm_ois_ctrl_t *o_ctrl)
 		return -EINVAL;
 	}
 
+//HTC_START, sensor and OIS use the same CCI, so init CCI by sensor
+#if 0
 	if (o_ctrl->ois_device_type == MSM_CAMERA_PLATFORM_DEVICE) {
 		rc = o_ctrl->i2c_client.i2c_func_tbl->i2c_util(
 			&o_ctrl->i2c_client, MSM_CCI_INIT);
 		if (rc < 0)
 			pr_err("cci_init failed\n");
 	}
+#else
+	rc = 0;
+#endif
+//HTC_END
 	o_ctrl->ois_state = OIS_OPS_ACTIVE;
 	CDBG("Exit\n");
 	return rc;
@@ -412,7 +377,7 @@ static int32_t msm_ois_control(struct msm_ois_ctrl_t *o_ctrl,
 	struct msm_ois_set_info_t *set_info)
 {
 	struct reg_settings_ois_t *settings = NULL;
-	int32_t rc = 0, i = 0;
+	int32_t rc = 0;
 	struct msm_camera_cci_client *cci_client = NULL;
 	CDBG("Enter\n");
 
@@ -454,18 +419,6 @@ static int32_t msm_ois_control(struct msm_ois_ctrl_t *o_ctrl,
 		rc = msm_ois_write_settings(o_ctrl,
 			set_info->ois_params.setting_size,
 			settings);
-
-		for (i = 0; i < set_info->ois_params.setting_size; i++) {
-			if (set_info->ois_params.settings[i].i2c_operation
-				== MSM_OIS_READ) {
-				set_info->ois_params.settings[i].reg_data =
-					settings[i].reg_data;
-				CDBG("ois_data at addr 0x%x is 0x%x",
-				set_info->ois_params.settings[i].reg_addr,
-				set_info->ois_params.settings[i].reg_data);
-			}
-		}
-
 		kfree(settings);
 		if (rc < 0) {
 			pr_err("Error\n");
@@ -477,6 +430,7 @@ static int32_t msm_ois_control(struct msm_ois_ctrl_t *o_ctrl,
 
 	return rc;
 }
+
 
 static int32_t msm_ois_config(struct msm_ois_ctrl_t *o_ctrl,
 	void __user *argp)
@@ -557,6 +511,24 @@ static int32_t msm_ois_config(struct msm_ois_ctrl_t *o_ctrl,
 		kfree(reg_setting);
 		break;
 	}
+#ifdef CONFIG_OIS_LC898123F40_4AXIS //HTC_START
+	case CFG_OIS_GET_BEHAVIOR_STATUS: {
+		uint8_t buf[4] = { 0 };
+		struct timeval time;
+		rc = o_ctrl->i2c_client.i2c_func_tbl->i2c_read_seq(&o_ctrl->i2c_client, 0xF120, &buf[0], 4);
+		if (rc < 0) {
+			pr_err("[OIS] %s: CFG_OIS_GET_BEHAVIOR_STATUS i2c_read fail. rc:%d\n", __func__, rc);
+			return rc;
+		}
+		do_gettimeofday(&time);
+		cdata->cfg.behavior.data = (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
+		cdata->cfg.behavior.timestamp.tv_sec = time.tv_sec;
+		cdata->cfg.behavior.timestamp.tv_usec = time.tv_usec;
+		CDBG("[OIS] get behavior data:0x%x %lld.%06lld\n", cdata->cfg.behavior.data, (long long)cdata->cfg.behavior.timestamp.tv_sec,(long long)cdata->cfg.behavior.timestamp.tv_usec);
+
+		break;
+	}
+#endif //HTC_END
 	default:
 		break;
 	}
@@ -653,6 +625,8 @@ static int msm_ois_close(struct v4l2_subdev *sd,
 		return -EINVAL;
 	}
 	mutex_lock(o_ctrl->ois_mutex);
+//HTC_START, sensor and OIS use the same CCI, so init CCI by sensor
+#if 0
 	if (o_ctrl->ois_device_type == MSM_CAMERA_PLATFORM_DEVICE &&
 		o_ctrl->ois_state != OIS_DISABLE_STATE) {
 		rc = o_ctrl->i2c_client.i2c_func_tbl->i2c_util(
@@ -660,6 +634,10 @@ static int msm_ois_close(struct v4l2_subdev *sd,
 		if (rc < 0)
 			pr_err("cci_init failed\n");
 	}
+#else
+	rc = 0;
+#endif
+//HTC_END
 	o_ctrl->ois_state = OIS_DISABLE_STATE;
 	mutex_unlock(o_ctrl->ois_mutex);
 	CDBG("Exit\n");
@@ -902,6 +880,14 @@ static long msm_ois_subdev_do_ioctl(
 	}
 	rc = msm_ois_subdev_ioctl(sd, cmd, parg);
 
+#ifdef CONFIG_OIS_LC898123F40_4AXIS //HTC_START
+	// write back to userspace
+	if (cmd == VIDIOC_MSM_OIS_CFG && u32->cfgtype == CFG_OIS_GET_BEHAVIOR_STATUS) {
+		u32->cfg.behavior.data = ois_data.cfg.behavior.data;
+		u32->cfg.behavior.timestamp.tv_sec = ois_data.cfg.behavior.timestamp.tv_sec;
+		u32->cfg.behavior.timestamp.tv_usec = ois_data.cfg.behavior.timestamp.tv_usec;
+	}
+#endif //HTC_END
 	return rc;
 }
 

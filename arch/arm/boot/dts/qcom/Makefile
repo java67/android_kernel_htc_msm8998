@@ -179,6 +179,21 @@ endif
 
 dtb-$(CONFIG_ARCH_MSMHAMSTER) += msmhamster-rumi.dtb
 
+# HTC msm8998 device dtbs
+dtb-$(CONFIG_ARCH_MSM8998) += \
+	msm8998-v2.1-htc_ocn-xa.dtb \
+	msm8998-v2.1-htc_ocn-xb.dtb \
+	msm8998-v2.1-htc_ocn-xc.dtb \
+	msm8998-v2.1-htc_ocn-xd.dtb \
+	msm8998-v2.1-htc_ocn-xe.dtb \
+	msm8998-v2.1-htc_ocn-xf.dtb \
+	msm8998-v2.1-htc_ocn-a.dtb \
+	msm8998-v2.1-htc_ocnuhljapan-xb.dtb \
+	msm8998-v2.1-htc_ocnuhljapan-xc.dtb \
+	msm8998-v2.1-htc_ocnuhljapan-xd.dtb \
+	msm8998-v2.1-htc_ocnuhljapan-xe.dtb \
+	msm8998-v2.1-htc_ocnuhljapan-a.dtb
+
 dtb-$(CONFIG_ARCH_SDM660) += sdm660-sim.dtb \
 	sdm660-internal-codec-cdp.dtb \
 	sdm660-internal-codec-mtp.dtb \
@@ -210,8 +225,6 @@ dtb-$(CONFIG_ARCH_SDM660) += sdm660-sim.dtb \
 	sdm660-pm660a-headset-jacktype-no-rcm.dtb \
 	sdm660-usbc-audio-mtp.dtb \
 	sdm660-usbc-audio-rcm.dtb \
-	sdm660-fhd-cdp.dtb \
-	sdm660-pm660a-fhd-cdp.dtb \
 	sdm658-mtp.dtb \
 	sdm658-cdp.dtb \
 	sdm658-rcm.dtb \

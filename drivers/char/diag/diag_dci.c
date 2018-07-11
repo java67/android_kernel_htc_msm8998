@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -211,7 +211,7 @@ static void dci_handshake_work_fn(struct work_struct *work)
 						handshake_work);
 
 	if (status->open) {
-		pr_debug("diag: In %s, remote dci channel is open, index: %d\n",
+		DIAG_DBUG("diag: In %s, remote dci channel is open, index: %d\n",
 			 __func__, status->id);
 		return;
 	}
@@ -688,7 +688,7 @@ int diag_dci_query_log_mask(struct diag_dci_client_tbl *entry,
 	byte_mask = 0x01 << (item_num % 8);
 	offset = equip_id * 514;
 
-	if (offset + byte_index >= DCI_LOG_MASK_SIZE) {
+	if (offset + byte_index > DCI_LOG_MASK_SIZE) {
 		pr_err("diag: In %s, invalid offset: %d, log_code: %d, byte_index: %d\n",
 				__func__, offset, log_code, byte_index);
 		return 0;
@@ -715,7 +715,7 @@ int diag_dci_query_event_mask(struct diag_dci_client_tbl *entry,
 	bit_index = event_id % 8;
 	byte_mask = 0x1 << bit_index;
 
-	if (byte_index >= DCI_EVENT_MASK_SIZE) {
+	if (byte_index > DCI_EVENT_MASK_SIZE) {
 		pr_err("diag: In %s, invalid, event_id: %d, byte_index: %d\n",
 				__func__, event_id, byte_index);
 		return 0;
@@ -767,7 +767,7 @@ static struct dci_pkt_req_entry_t *diag_register_dci_transaction(int uid,
 	entry->client_id = client_id;
 	entry->uid = uid;
 	entry->tag = driver->dci_tag;
-	pr_debug("diag: Registering DCI cmd req, client_id: %d, uid: %d, tag:%d\n",
+	DIAG_DBUG("diag: Registering DCI cmd req, client_id: %d, uid: %d, tag:%d\n",
 				entry->client_id, entry->uid, entry->tag);
 	list_add_tail(&entry->track, &driver->dci_req_list);
 
@@ -863,7 +863,7 @@ static void dci_process_ctrl_status(unsigned char *buf, int len, int token)
 	read_len += sizeof(struct diag_ctrl_dci_status);
 
 	for (i = 0; i < header->count; i++) {
-		if (read_len > (len - 2)) {
+		if (read_len > len) {
 			pr_err("diag: In %s, Invalid length len: %d\n",
 			       __func__, len);
 			return;
@@ -955,7 +955,7 @@ void extract_dci_ctrl_pkt(unsigned char *buf, int len, int token)
 		dci_process_ctrl_handshake_pkt(temp, len, token);
 		break;
 	default:
-		pr_debug("diag: In %s, unknown control pkt %d\n",
+		DIAG_DBUG("diag: In %s, unknown control pkt %d\n",
 			 __func__, ctrl_pkt_id);
 		break;
 	}
@@ -1162,30 +1162,17 @@ void extract_dci_events(unsigned char *buf, int len, int data_source,
 	struct list_head *start, *temp;
 	struct diag_dci_client_tbl *entry = NULL;
 
-	if (!buf) {
-		pr_err("diag: In %s buffer is NULL\n", __func__);
+	length = *(uint16_t *)(buf + 1); /* total length of event series */
+	if (length == 0) {
+		pr_err("diag: Incoming dci event length is invalid\n");
 		return;
 	}
 	/*
-	 * 1 byte for event code and 2 bytes for the length field.
+	 * Move directly to the start of the event series. 1 byte for
+	 * event code and 2 bytes for the length field.
 	 * The length field indicates the total length removing the cmd_code
 	 * and the lenght field. The event parsing in that case should happen
 	 * till the end.
-	 */
-	if (len < 3) {
-		pr_err("diag: In %s invalid len: %d\n", __func__, len);
-		return;
-	}
-	length = *(uint16_t *)(buf + 1); /* total length of event series */
-	if ((length == 0) || (len != (length + 3))) {
-		pr_err("diag: Incoming dci event length: %d is invalid\n",
-			length);
-		return;
-	}
-	/*
-	 * Move directly to the start of the event series.
-	 * The event parsing should happen from start of event
-	 * series till the end.
 	 */
 	temp_len = 3;
 	while (temp_len < length) {
@@ -1203,60 +1190,30 @@ void extract_dci_events(unsigned char *buf, int len, int data_source,
 			 * necessary.
 			 */
 			timestamp_len = 8;
-			if ((temp_len + timestamp_len + 2) <= len)
-				memcpy(timestamp, buf + temp_len + 2,
-					timestamp_len);
-			else {
-				pr_err("diag: Invalid length in %s, len: %d, temp_len: %d",
-						__func__, len, temp_len);
-				return;
-			}
+			memcpy(timestamp, buf + temp_len + 2, timestamp_len);
 		}
 		/* 13th and 14th bit represent the payload length */
 		if (((event_id_packet & 0x6000) >> 13) == 3) {
 			payload_len_field = 1;
-			if ((temp_len + timestamp_len + 3) <= len) {
-				payload_len = *(uint8_t *)
+			payload_len = *(uint8_t *)
 					(buf + temp_len + 2 + timestamp_len);
-			} else {
-				pr_err("diag: Invalid length in %s, len: %d, temp_len: %d",
-						__func__, len, temp_len);
-				return;
-			}
-			if ((payload_len < (MAX_EVENT_SIZE - 13)) &&
-			((temp_len + timestamp_len + payload_len + 3) <= len)) {
-				/*
-				 * Copy the payload length and the payload
-				 * after skipping temp_len bytes for already
-				 * parsed packet, timestamp_len for timestamp
-				 * buffer, 2 bytes for event_id_packet.
-				 */
+			if (payload_len < (MAX_EVENT_SIZE - 13)) {
+				/* copy the payload length and the payload */
 				memcpy(event_data + 12, buf + temp_len + 2 +
 							timestamp_len, 1);
 				memcpy(event_data + 13, buf + temp_len + 2 +
 					timestamp_len + 1, payload_len);
 			} else {
-				pr_err("diag: event > %d, payload_len = %d, temp_len = %d\n",
-				(MAX_EVENT_SIZE - 13), payload_len, temp_len);
+				pr_err("diag: event > %d, payload_len = %d\n",
+					(MAX_EVENT_SIZE - 13), payload_len);
 				return;
 			}
 		} else {
 			payload_len_field = 0;
 			payload_len = (event_id_packet & 0x6000) >> 13;
-			/*
-			 * Copy the payload after skipping temp_len bytes
-			 * for already parsed packet, timestamp_len for
-			 * timestamp buffer, 2 bytes for event_id_packet.
-			 */
-			if ((payload_len < (MAX_EVENT_SIZE - 12)) &&
-			((temp_len + timestamp_len + payload_len + 2) <= len))
-				memcpy(event_data + 12, buf + temp_len + 2 +
+			/* copy the payload */
+			memcpy(event_data + 12, buf + temp_len + 2 +
 						timestamp_len, payload_len);
-			else {
-				pr_err("diag: event > %d, payload_len = %d, temp_len = %d\n",
-				(MAX_EVENT_SIZE - 12), payload_len, temp_len);
-				return;
-			}
 		}
 
 		/* Before copying the data to userspace, check if we are still
@@ -1380,18 +1337,18 @@ void extract_dci_log(unsigned char *buf, int len, int data_source, int token,
 		pr_err("diag: In %s buffer is NULL\n", __func__);
 		return;
 	}
-	/*
-	 * The first eight bytes for the incoming log packet contains
-	 * Command code (2), the length of the packet (2), the length
-	 * of the log (2) and log code (2)
-	 */
-	if (len < 8) {
-		pr_err("diag: In %s invalid len: %d\n", __func__, len);
-		return;
-	}
 
+	/* The first six bytes for the incoming log packet contains
+	 * Command code (2), the length of the packet (2) and the length
+	 * of the log (2)
+	 */
 	log_code = *(uint16_t *)(buf + 6);
 	read_bytes += sizeof(uint16_t) + 6;
+	if (read_bytes > len) {
+		pr_err("diag: Invalid length in %s, len: %d, read: %d",
+						__func__, len, read_bytes);
+		return;
+	}
 
 	/* parse through log mask table of each client and check mask */
 	mutex_lock(&driver->dci_mutex);
@@ -1400,7 +1357,7 @@ void extract_dci_log(unsigned char *buf, int len, int data_source, int token,
 		if (entry->client_info.token != token)
 			continue;
 		if (diag_dci_query_log_mask(entry, log_code)) {
-			pr_debug("\t log code %x needed by client %d",
+			DIAG_DBUG("\t log code %x needed by client %d",
 				 log_code, entry->client->tgid);
 			/* copy to client buffer */
 			copy_dci_log(buf, len, entry, data_source, ext_hdr);
@@ -1419,10 +1376,6 @@ void extract_dci_ext_pkt(unsigned char *buf, int len, int data_source,
 		pr_err("diag: In %s buffer is NULL\n", __func__);
 		return;
 	}
-	if (len < (EXT_HDR_LEN + sizeof(uint8_t))) {
-		pr_err("diag: In %s invalid len: %d\n", __func__, len);
-		return;
-	}
 
 	version = *(uint8_t *)buf + 1;
 	if (version < EXT_HDR_VERSION)  {
@@ -1434,6 +1387,10 @@ void extract_dci_ext_pkt(unsigned char *buf, int len, int data_source,
 	pkt = buf + EXT_HDR_LEN;
 	pkt_cmd_code = *(uint8_t *)pkt;
 	len -= EXT_HDR_LEN;
+	if (len < 0) {
+		pr_err("diag: %s, Invalid length len: %d\n", __func__, len);
+		return;
+	}
 
 	switch (pkt_cmd_code) {
 	case LOG_CMD_CODE:
@@ -1964,7 +1921,7 @@ static int diag_process_dci_pkt_rsp(unsigned char *buf, int len)
 
 	/* Check if the command is allowed on DCI */
 	if (diag_dci_filter_commands(header)) {
-		pr_debug("diag: command not supported %d %d %d",
+		DIAG_DBUG("diag: command not supported %d %d %d",
 			 header->cmd_code, header->subsys_id,
 			 header->subsys_cmd_code);
 		mutex_unlock(&driver->dci_mutex);
@@ -1973,7 +1930,7 @@ static int diag_process_dci_pkt_rsp(unsigned char *buf, int len)
 
 	common_cmd = diag_check_common_cmd(header);
 	if (common_cmd < 0) {
-		pr_debug("diag: error in checking common command, %d\n",
+		DIAG_DBUG("diag: error in checking common command, %d\n",
 			 common_cmd);
 		mutex_unlock(&driver->dci_mutex);
 		return DIAG_DCI_SEND_DATA_FAIL;
@@ -2110,7 +2067,7 @@ int diag_process_dci_transaction(unsigned char *buf, int len)
 			mutex_unlock(&driver->dci_mutex);
 			return -ENOMEM;
 		}
-		pr_debug("diag: head of dci log mask %pK\n", head_log_mask_ptr);
+		DIAG_DBUG("diag: head of dci log mask %pK\n", head_log_mask_ptr);
 		count = 0; /* iterator for extracting log codes */
 
 		while (count < num_codes) {
@@ -2140,11 +2097,11 @@ int diag_process_dci_transaction(unsigned char *buf, int len)
 			while (log_mask_ptr && (offset < DCI_LOG_MASK_SIZE)) {
 				if (*log_mask_ptr == equip_id) {
 					found = 1;
-					pr_debug("diag: find equip id = %x at %pK\n",
+					DIAG_DBUG("diag: find equip id = %x at %pK\n",
 						 equip_id, log_mask_ptr);
 					break;
 				} else {
-					pr_debug("diag: did not find equip id = %x at %d\n",
+					DIAG_DBUG("diag: did not find equip id = %x at %d\n",
 						 equip_id, *log_mask_ptr);
 					log_mask_ptr += 514;
 					offset += 514;
@@ -2224,7 +2181,7 @@ int diag_process_dci_transaction(unsigned char *buf, int len)
 			mutex_unlock(&driver->dci_mutex);
 			return -ENOMEM;
 		}
-		pr_debug("diag: head of dci event mask %pK\n", event_mask_ptr);
+		DIAG_DBUG("diag: head of dci event mask %pK\n", event_mask_ptr);
 		count = 0; /* iterator for extracting log codes */
 		while (count < num_codes) {
 			if (read_len >= USER_SPACE_DATA) {

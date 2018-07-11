@@ -11,6 +11,8 @@
 #include <linux/swap.h>
 #include <linux/vmstat.h>
 #include <linux/atomic.h>
+#include <linux/msm_ion.h>
+#include <linux/msm_kgsl.h>
 #include <linux/vmalloc.h>
 #ifdef CONFIG_CMA
 #include <linux/cma.h>
@@ -21,6 +23,40 @@
 
 void __attribute__((weak)) arch_report_meminfo(struct seq_file *m)
 {
+}
+
+static inline unsigned long free_cma_pages(void)
+{
+#ifdef CONFIG_CMA
+	return global_page_state(NR_FREE_CMA_PAGES);
+#else
+	return 0UL;
+#endif
+}
+
+void driver_report_meminfo(struct seq_file *m)
+{
+	unsigned long kgsl_alloc = kgsl_get_alloc_size(true);
+	uintptr_t ion_alloc = msm_ion_heap_meminfo(true);
+	uintptr_t ion_inuse = msm_ion_heap_meminfo(false);
+	unsigned long free_cma = free_cma_pages();
+
+	/*
+	 * display in kilobytes.
+	 */
+#define K(x) ((x) << (PAGE_SHIFT - 10))
+
+	seq_printf(m,
+		"KgslAlloc:      %8lu kB\n"
+		"IonTotal:       %8lu kB\n"
+		"IonInUse:       %8lu kB\n"
+		"FreeCma:        %8lu kB\n",
+		(kgsl_alloc >> 10),
+		(ion_alloc >> 10),
+		(ion_inuse >> 10),
+		K(free_cma));
+
+#undef K
 }
 
 static int meminfo_proc_show(struct seq_file *m, void *v)
@@ -75,13 +111,6 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	 */
 	available += global_page_state(NR_SLAB_RECLAIMABLE) -
 		     min(global_page_state(NR_SLAB_RECLAIMABLE) / 2, wmark_low);
-
-	/*
-	 * Part of the kernel memory, which can be released under memory
-	 * pressure.
-	 */
-	available += global_page_state(NR_INDIRECTLY_RECLAIMABLE_BYTES) >>
-		PAGE_SHIFT;
 
 	if (available < 0)
 		available = 0;
@@ -210,6 +239,8 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	hugetlb_report_meminfo(m);
 
 	arch_report_meminfo(m);
+
+	driver_report_meminfo(m);
 
 	return 0;
 #undef K

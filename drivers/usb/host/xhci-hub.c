@@ -408,6 +408,14 @@ static int xhci_stop_device(struct xhci_hcd *xhci, int slot_id, int suspend)
 				xhci_free_command(xhci, command);
 				goto cmd_cleanup;
 			}
+
+			ret = xhci_queue_stop_endpoint(xhci, command, slot_id,
+					i, suspend);
+			if (ret) {
+				spin_unlock_irqrestore(&xhci->lock, flags);
+				xhci_free_command(xhci, command);
+				goto cmd_cleanup;
+			}
 		}
 	}
 	ret = xhci_queue_stop_endpoint(xhci, cmd, slot_id, 0, suspend);
@@ -415,7 +423,6 @@ static int xhci_stop_device(struct xhci_hcd *xhci, int slot_id, int suspend)
 		spin_unlock_irqrestore(&xhci->lock, flags);
 		goto cmd_cleanup;
 	}
-
 	xhci_ring_cmd_db(xhci);
 	spin_unlock_irqrestore(&xhci->lock, flags);
 

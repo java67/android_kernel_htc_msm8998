@@ -1303,15 +1303,13 @@ static int ath10k_core_fetch_firmware_files(struct ath10k *ar)
 	int ret;
 	struct ath10k_fw_file *fw_file;
 
-	if (!ar->is_bmi) {
+	if (!ar->is_bmi && QCA_REV_WCN3990(ar)) {
 		fw_file = &ar->normal_mode_fw.fw_file;
 		fw_file->wmi_op_version = ATH10K_FW_WMI_OP_VERSION_TLV;
 		fw_file->htt_op_version = ATH10K_FW_HTT_OP_VERSION_TLV;
 		__set_bit(ATH10K_FW_FEATURE_WOWLAN_SUPPORT,
 			  fw_file->fw_features);
 		__set_bit(WMI_SERVICE_WOW, ar->wmi.svc_map);
-		__set_bit(ATH10K_FW_FEATURE_NO_NWIFI_DECAP_4ADDR_PADDING,
-			  fw_file->fw_features);
 		return 0;
 	}
 
@@ -1998,28 +1996,6 @@ int ath10k_core_start(struct ath10k *ar, enum ath10k_firmware_mode mode,
 	if (status) {
 		ath10k_err(ar, "wmi unified ready event not received\n");
 		goto err_hif_stop;
-	}
-
-	/* Some firmware revisions do not properly set up hardware rx filter
-	 * registers.
-	 *
-	 * A known example from QCA9880 and 10.2.4 is that MAC_PCU_ADDR1_MASK
-	 * is filled with 0s instead of 1s allowing HW to respond with ACKs to
-	 * any frames that matches MAC_PCU_RX_FILTER which is also
-	 * misconfigured to accept anything.
-	 *
-	 * The ADDR1 is programmed using internal firmware structure field and
-	 * can't be (easily/sanely) reached from the driver explicitly. It is
-	 * possible to implicitly make it correct by creating a dummy vdev and
-	 * then deleting it.
-	 */
-	if (!QCA_REV_WCN3990(ar)) {
-		status = ath10k_core_reset_rx_filter(ar);
-		if (status) {
-			ath10k_err(ar, "failed to reset rx filter: %d\n",
-				   status);
-			goto err_hif_stop;
-		}
 	}
 
 	status = ath10k_htt_rx_ring_refill(ar);

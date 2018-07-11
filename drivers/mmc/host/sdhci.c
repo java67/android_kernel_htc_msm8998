@@ -55,6 +55,13 @@
 static unsigned int debug_quirks = 0;
 static unsigned int debug_quirks2;
 
+/*
+ * Allocate memory for SD card
+ */
+extern struct scatterlist *cur_sg;
+extern struct scatterlist *prev_sg;
+extern struct scatterlist *mmc_alloc_sg(int sg_len, int *err);
+
 static void sdhci_finish_data(struct sdhci_host *);
 
 static void sdhci_finish_command(struct sdhci_host *);
@@ -843,7 +850,7 @@ static void sdhci_set_timeout(struct sdhci_host *host, struct mmc_command *cmd)
 	if (host->ops->set_timeout) {
 		host->ops->set_timeout(host, cmd);
 	} else {
-		count = sdhci_calc_timeout(host, cmd);
+		count = max(sdhci_calc_timeout(host, cmd), (u8) 0xA);
 		sdhci_writeb(host, count, SDHCI_TIMEOUT_CONTROL);
 	}
 }
@@ -2852,6 +2859,9 @@ static void sdhci_timeout_timer(unsigned long data)
 	spin_lock_irqsave(&host->lock, flags);
 
 	if (host->mrq) {
+		host->mmc->error_count += 2;
+		pr_err("%s: CMD%d: Request timeout\n",
+			mmc_hostname(host->mmc), SDHCI_GET_CMD(sdhci_readw(host, SDHCI_COMMAND)));
 		pr_err("%s: Timeout waiting for hardware "
 			"interrupt.\n", mmc_hostname(host->mmc));
 		MMC_TRACE(host->mmc, "Timeout waiting for h/w interrupt\n");
@@ -2993,13 +3003,13 @@ static void sdhci_adma_show_error(struct sdhci_host *host)
 		struct sdhci_adma2_64_desc *dma_desc = desc;
 
 		if (host->flags & SDHCI_USE_64_BIT_DMA)
-			DBG("%s: %pK: DMA 0x%08x%08x, LEN 0x%04x,Attr=0x%02x\n",
+			DBG("%s: %p: DMA 0x%08x%08x, LEN 0x%04x, Attr=0x%02x\n",
 			    name, desc, le32_to_cpu(dma_desc->addr_hi),
 			    le32_to_cpu(dma_desc->addr_lo),
 			    le16_to_cpu(dma_desc->len),
 			    le16_to_cpu(dma_desc->cmd));
 		else
-			DBG("%s: %pK: DMA 0x%08x, LEN 0x%04x, Attr=0x%02x\n",
+			DBG("%s: %p: DMA 0x%08x, LEN 0x%04x, Attr=0x%02x\n",
 			    name, desc, le32_to_cpu(dma_desc->addr_lo),
 			    le16_to_cpu(dma_desc->len),
 			    le16_to_cpu(dma_desc->cmd));
@@ -4308,6 +4318,17 @@ int sdhci_add_host(struct sdhci_host *host)
 		mmc->max_segs = 1;
 	else /* PIO */
 		mmc->max_segs = SDHCI_MAX_SEGS;
+
+	/*
+	 * Allocat memory at boot time.
+	 * To avoid memory leak problem.
+	 */
+	cur_sg = mmc_alloc_sg(mmc->max_segs, &ret);
+	if (ret)
+		printk("%s %s alloc cur_sg err : %d\n", mmc_hostname(mmc), __func__, ret);
+	prev_sg = mmc_alloc_sg(mmc->max_segs, &ret);
+	if (ret)
+		printk("%s %s alloc prev_sg err : %d\n", mmc_hostname(mmc), __func__, ret);
 
 	/*
 	 * Maximum number of sectors in one transfer. Limited by SDMA boundary

@@ -149,10 +149,11 @@ static void service_locator_recv_msg(struct work_struct *work)
 
 	do {
 		pr_debug("Notified about a Receive event\n");
-	} while ((ret = qmi_recv_msg(service_locator.clnt_handle)) == 0);
-
-	if (ret != -ENOMSG)
-		pr_err("Error receiving message rc:%d\n", ret);
+		ret = qmi_recv_msg(service_locator.clnt_handle);
+		if (ret < 0)
+			pr_err("Error receiving message rc:%d. Retrying...\n",
+								ret);
+	} while (ret == 0);
 
 }
 
@@ -189,7 +190,7 @@ static int servreg_loc_send_msg(struct msg_desc *req_desc,
 	 */
 	rc = qmi_send_req_wait(service_locator.clnt_handle, req_desc, req,
 		sizeof(*req), resp_desc, resp, sizeof(*resp),
-		QMI_SERVREG_LOC_SERVER_TIMEOUT);
+		msecs_to_jiffies(QMI_SERVREG_LOC_SERVER_TIMEOUT));
 	if (rc < 0) {
 		pr_err("QMI send req failed for client %s, ret - %d\n",
 			pd->client_name, rc);
@@ -350,7 +351,7 @@ inited:
 int get_service_location(char *client_name, char *service_name,
 				struct notifier_block *locator_nb)
 {
-	struct pd_qmi_client_data *pqcd;
+	struct pd_qmi_client_data *pqcd = NULL;
 	struct pd_qmi_work *pqw;
 	int rc = 0;
 
@@ -383,7 +384,12 @@ int get_service_location(char *client_name, char *service_name,
 	INIT_WORK(&pqw->pd_loc_work, pd_locator_work);
 	schedule_work(&pqw->pd_loc_work);
 
+	return rc;
+
 err:
+	if(pqcd)
+		kfree(pqcd);
+
 	return rc;
 }
 EXPORT_SYMBOL(get_service_location);
