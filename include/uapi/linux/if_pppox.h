@@ -19,6 +19,7 @@
 
 #include <linux/types.h>
 #include <asm/byteorder.h>
+#include <linux/if.h>
 
 #include <linux/socket.h>
 #include <linux/if_ether.h>
